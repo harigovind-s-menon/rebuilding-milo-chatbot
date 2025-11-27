@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Rebuilding Milo — Chat UI</title>
+  <style>
+    :root {
+      --bg:#0f1724; --card:#0b1220; --muted:#9aa4b2; --accent:#06b6d4; --accent-2:#7c3aed;
+      --text:#e6eef6;
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071129 0%, #041020 100%);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+    .app{max-width:900px;margin:32px auto;padding:20px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));box-shadow:0 6px 30px rgba(2,6,23,0.6);}
+    h1{color:var(--text);margin:0 0 12px;font-size:20px}
+    .chat{height:60vh;overflow:auto;padding:12px;border-radius:8px;background:linear-gradient(180deg, #03101a, #06121a);border:1px solid rgba(255,255,255,0.02)}
+    .msg{margin:8px 0;display:flex;gap:12px}
+    .bubble{padding:12px 14px;border-radius:10px;max-width:82%;line-height:1.4}
+    .user{margin-left:auto;background:#062b3a;color:var(--text);border:1px solid rgba(6,182,212,0.08)}
+    .bot{background:#071a2b;color:var(--text);border:1px solid rgba(124,58,237,0.06)}
+    .meta{color:var(--muted);font-size:12px;margin-top:6px}
+    .controls{display:flex;gap:8px;margin-top:12px}
+    input[type="text"]{flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:var(--text)}
+    button{padding:10px 14px;border-radius:8px;border:0;background:linear-gradient(90deg,var(--accent),var(--accent-2));color:white;cursor:pointer}
+    .sources{margin-top:10px;color:var(--muted);font-size:13px}
+    .source-item{padding:8px;border-radius:6px;background:rgba(255,255,255,0.01);margin:6px 0}
+    .small{font-size:12px;color:var(--muted)}
+    footer{margin-top:14px;color:var(--muted);font-size:12px;text-align:right}
+    .loader{width:10px;height:10px;border-radius:50%;display:inline-block;animation:blink 1s infinite}
+    @keyframes blink {0%{opacity:1}50%{opacity:.2}100%{opacity:1}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Rebuilding Milo — Chat (RAG)</h1>
+    <div class="chat" id="chat"></div>
+
+    <div style="margin-top:12px" class="controls">
+      <input id="question" type="text" placeholder="Ask a question about the book (e.g., How should I recover from a knee injury?)" />
+      <button id="send">Ask</button>
+    </div>
+
+    <div style="margin-top:8px" class="small">
+      <label>Chunks file: </label>
+      <input id="chunksPath" type="text" value="data\squat_university_-_rebuilding_milo_-_a_lifter's_guide_to_fixing_common_injuries_and_building_a_strong_foundation_for_enhancing_performance\chunks.jsonl" style="width:70%; padding:6px;border-radius:6px;background:transparent;border:1px solid rgba(255,255,255,0.03);color:var(--text)" />
+    </div>
+
+    <footer>Local demo • served from FastAPI • OpenAI & Pinecone keys used on server</footer>
+  </div>
+
+<script>
+const chat = document.getElementById('chat');
+const qin = document.getElementById('question');
+const send = document.getElementById('send');
+const chunksInput = document.getElementById('chunksPath');
+
+function appendMessage(kind, text, meta) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble ' + (kind === 'user' ? 'user' : 'bot');
+  bubble.innerText = text;
+  wrap.appendChild(bubble);
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.innerText = meta;
+    wrap.appendChild(m);
+  }
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function showSources(sources) {
+  const box = document.createElement('div');
+  box.className = 'sources';
+  box.innerHTML = '<strong>Sources:</strong>';
+  sources.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'source-item';
+    el.innerHTML = `<div class="small"><strong>pages:</strong> ${s.meta.page_start}-${s.meta.page_end} • <strong>chunk:</strong> ${s.meta.chunk_index} • <strong>score:</strong> ${s.score.toFixed(3)}</div>
+                    <div style="margin-top:6px">${(s.meta.source||'').split('#')[0]}</div>`;
+    box.appendChild(el);
+  });
+  chat.appendChild(box);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function ask(question) {
+  if (!question || !question.trim()) return;
+  appendMessage('user', question);
+  appendMessage('bot', 'Thinking…', 'Requesting context and answer...');
+  const lastBot = chat.querySelectorAll('.msg .bot');
+  const placeholder = lastBot[lastBot.length-1];
+
+  const body = {
+    chunks_path: chunksInput.value,
+    question: question,
+    top_k: 5
+  };
+
+  try {
+    const res = await fetch('/rag', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    // remove the "Thinking..." placeholder bubble
+    if (placeholder) placeholder.innerText = '';
+    if (!res.ok) {
+      appendMessage('bot', 'Error: ' + (data.detail || res.statusText));
+      return;
+    }
+    const answer = data.answer || "(no answer)";
+    appendMessage('bot', answer);
+    if (Array.isArray(data.sources) && data.sources.length) {
+      showSources(data.sources);
+    }
+  } catch (e) {
+    if (placeholder) placeholder.innerText = '';
+    appendMessage('bot', 'Network or server error: ' + e.message);
+  }
+}
+
+send.addEventListener('click', () => {
+  ask(qin.value);
+  qin.value = '';
+  qin.focus();
+});
+qin.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { send.click(); }
+});
+
+// helpful demo welcome message
+appendMessage('bot', 'Hello — ask a question about the loaded book. Example: "How should I recover from a knee injury?"', 'Tip: edit the "Chunks file" field if you want to point to a different book');
+</script>
+</body>
+</html>

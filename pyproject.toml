@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "rebuilding-milo-chatbot"
+version = "0.0.1"
+description = "RAG chatbot built from a book PDF — ingestion, embeddings, and retrieval"
+authors = ["Your Name <you@example.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+click = "8.1.7"
+python-dotenv = "1.0.0"
+ujson = "5.8.0"
+fastapi = "0.95.2"
+uvicorn = "0.22.0"
+pypdf = "^6.4.0"
+openai = "^2.8.1"
+numpy = "^2.3.5"
+pinecone = "^8.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
