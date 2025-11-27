@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any
 from pathlib import Path
 
+from src.reranker import get_reranker
 import os
 from src.embeddings.embedder import embed_texts
 from src.vectorstore.pinecone_store import get_pinecone_client, get_or_create_index, query_index
@@ -50,6 +51,8 @@ class RagRequest(BaseModel):
     question: str
     top_k: int = 5
     max_context_chars: int = 4000
+    reranker: str = "dynamic"           # "dynamic", "cross_encoder", "none"
+    reranker_model: str | None = None   # e.g. "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 def load_id_to_text(path: Path) -> Dict[str, Dict[str,Any]]:
     d = {}
@@ -114,7 +117,23 @@ async def rag_endpoint(req: RagRequest):
     try:
         pc = get_pinecone_client()
         index = get_or_create_index(pc)
-        matches = query_index(index, q_emb, top_k=req.top_k)
+        # request a wider candidate set; default to 50 for reranking
+        candidate_k = max(req.top_k, int(os.getenv("RERANK_CANDIDATE_K", "50")))
+        candidates = query_index(index, q_emb, top_k=candidate_k)
+
+        # instantiate reranker from factory
+        try:
+            reranker = get_reranker(req.reranker, max_k=req.top_k, model_name=(req.reranker_model or os.getenv("RERANK_CE_MODEL")))
+        except Exception as e:
+            # fallback to dynamic reranker if factory fails
+            reranker = get_reranker("dynamic", max_k=req.top_k)
+
+        try:
+            matches = reranker.rerank(req.question, candidates)
+        except Exception as e:
+            # if reranker fails, fallback to the raw candidates truncated to top_k
+            matches = candidates[: req.top_k]
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pinecone query failed: {e}")
 

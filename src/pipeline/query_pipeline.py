@@ -15,6 +15,7 @@ from pathlib import Path
 
 from src.embeddings.embedder import embed_texts
 from src.vectorstore.pinecone_store import get_pinecone_client, get_or_create_index, query_index
+from src.reranker import get_reranker
 
 def load_id_to_text(path: Path):
     d = {}
@@ -59,9 +60,17 @@ def run_query(chunks_jsonl: str, question: str, top_k: int = 5):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python -m src.pipeline.query_pipeline <chunks.jsonl> \"<question>\" [top_k]")
+        print("Usage: python -m src.pipeline.query_pipeline <chunks.jsonl> \"<question>\" [top_k] [reranker]")
         raise SystemExit(1)
     chunks = sys.argv[1]
     question = sys.argv[2]
     top_k = int(sys.argv[3]) if len(sys.argv) > 3 else 5
+    reranker_name = sys.argv[4] if len(sys.argv) > 4 else "dynamic"
+    reranker = get_reranker(reranker_name, max_k=top_k)
+    # adjust candidate window if reranker is cross_encoder
+    candidate_k = 50 if reranker_name.lower().startswith("cross") else top_k
+    # embed & query (reuse existing code flow)...
+    # after obtaining matches from query_index(..., top_k=candidate_k) do:
+    matches = reranker.rerank(question, matches)
+    # then print results from matches as before
     run_query(chunks, question, top_k=top_k)
